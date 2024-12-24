@@ -6,7 +6,8 @@ from io import BytesIO
 import pytz
 
 BOT_TOKEN = "7611352526:AAHFz0r0X_6kV9Uv5EyN-kx-WE5DuBXa3Vk"
-url = "http://127.0.0.1:8000/temperature/get-temperature-data/"
+url_temp = "http://127.0.0.1:8000/temperature/get-temperature-data/"
+url_press = "http://127.0.0.1:8000/temperature/get-pressure-data/"
 horizontal_delimiter = "-"
 
 def format_temperature_data(data):
@@ -22,11 +23,24 @@ def format_temperature_data(data):
         counter += 1
     return formatted_data
 
+def format_pressure_data(data):
+    formatted_data = []
+    counter = 1
+    for entry in data:
+        timestamp = datetime.fromisoformat(entry["time"].replace("Z", "+00:00"))
+        formatted_time = timestamp.astimezone(pytz.timezone('Asia/Novosibirsk')).strftime("%I:%M:%S %p")
+        
+        pressure = f"{round(entry['value'], 2):.2f}°"
+
+        formatted_data.append(f"Stamp {counter}: \t {formatted_time}: \t {pressure}")
+        counter += 1
+    return formatted_data
+
 async def start(update, context):
     await update.message.reply_text(
         "👋 Hi there!\n\n"
         "I am a bot that fetches temperature data from your Django backend. "
-        "Use /recent_temperature to see the latest readings."
+        "Use /recent_temperature or /recent_pressure to see the latest readings."
         "\n\n For more information, use /help."
     )
 
@@ -37,6 +51,7 @@ async def help_command(update: Update, context: CallbackContext):
         "/help - Show this help message with available commands.\n"
         "/auth <username> <password> - Authenticate using your website account credentials.\n"
         "/recent_temperature - Fetch the most recent temperature records.\n"
+        "/recent_pressure - Fetch the most recent pressure records.\n"
         "/plot - Get a plot of temperature data over the last 24 hours.\n"
     )
     await update.message.reply_text(help_text)
@@ -75,19 +90,20 @@ async def get_plot(update: Update, context: CallbackContext):
     try:
         response = requests.get("http://127.0.0.1:8000/temperature/serve-plot/")
 
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.content}")
+
         if response.status_code == 200:
             image = BytesIO(response.content)
-            await update.message.reply_photo(photo=image, caption="Here is the latest temperature plot!")
+            await update.message.reply_photo(photo=image, caption="Here is the latest temperature and pressure plot!")
         else:
-            await update.message.reply_text("Failed to fetch the temperature plot.")
+            await update.message.reply_text("Failed to fetch the plot. Please try again later.")
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
 
-    
-
 async def get_temperature(update: Update, context: CallbackContext):
     try:
-        response = requests.get(url)
+        response = requests.get(url_temp)
         print(f"Status Code: {response.status_code}")
         print(f"Response Text: {response.text}")
         if response.status_code == 200:
@@ -98,6 +114,24 @@ async def get_temperature(update: Update, context: CallbackContext):
 
             formatted_data = format_temperature_data(data[:5][::-1])
             message = f"Last 5 Temperature Records:\n {50 * horizontal_delimiter} \n" + "\n".join(formatted_data)
+
+            await update.message.reply_text(message)
+        else:
+            await update.message.reply_text("Failed to fetch temperature data.")
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {str(e)}")
+        
+async def get_pressure(update: Update, context: CallbackContext):
+    try:
+        response = requests.get(url_press)
+        if response.status_code == 200:
+            data = response.json()["data"]
+            if not data:
+                await update.message.reply_text("No pressure data available.")
+                return
+
+            formatted_data = format_pressure_data(data[:5][::-1])
+            message = f"Last 5 Pressure Records:\n {50 * horizontal_delimiter} \n" + "\n".join(formatted_data)
 
             await update.message.reply_text(message)
         else:
@@ -120,5 +154,7 @@ def start_bot():
     application.add_handler(CommandHandler("plot", get_plot))
 
     application.add_handler(CommandHandler("recent_temperature", get_temperature))
+    
+    application.add_handler(CommandHandler("recent_pressure", get_pressure))
 
     application.run_polling()
